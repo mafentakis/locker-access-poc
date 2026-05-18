@@ -6,7 +6,6 @@ services:
       dockerfile: cert-init/Dockerfile
     volumes:
       - ./certs:/out
-      - ./scripts:/scripts:ro
     networks:
       - locker-net
     restart: "no"
