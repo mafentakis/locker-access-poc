@@ -28,13 +28,12 @@ public final class RestServerMain {
         String mqttClientId = System.getenv().getOrDefault("MQTT_CLIENT_ID", "rest-server");
         String mqttTopic = System.getenv().getOrDefault("MQTT_TOPIC_OPENED",
                 "psfusion/business-event/v010/compartment/opened");
+        String lockerVersion = System.getenv().getOrDefault("LOCKER_VERSION", "1.0.0");
 
         SSLContext sslContext = TlsContextFactory.create();
 
-        // MQTT emitter
         MqttEventEmitter emitter = new MqttEventEmitter(brokerUri, mqttClientId, mqttTopic, sslContext);
 
-        // HTTPS server
         HttpsServer server = HttpsServer.create(new InetSocketAddress(host, port), 0);
         server.setHttpsConfigurator(new HttpsConfigurator(sslContext) {
             @Override
@@ -45,7 +44,6 @@ public final class RestServerMain {
             }
         });
 
-        // Health endpoint
         server.createContext("/health", exchange -> {
             byte[] body = "{\"status\":\"UP\"}".getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().set("Content-Type", "application/json");
@@ -55,7 +53,7 @@ public final class RestServerMain {
             }
         });
 
-        // Business endpoint — matches all /api/... paths
+        server.createContext("/api/locker/", new LockerVersionHandler(lockerVersion));
         server.createContext("/api/", new OpenCompartmentHandler(emitter));
 
         server.setExecutor(null);
