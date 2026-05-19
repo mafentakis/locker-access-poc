@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # gen-certs.sh - Generate self-signed CA + leaf certs for locker-poc (mTLS)
-# Preserves existing files unless FORCE=1.
+# Preserves existing PEM files unless FORCE=1, but always rebuilds PKCS#12 stores.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -25,17 +25,16 @@ fi
 for SVC in "${SERVICES[@]}"; do
   KEY="$OUT/$SVC.key"
   CRT="$OUT/$SVC.crt"
-  P12="$OUT/$SVC-keystore.p12"
   SAN="$OUT/$SVC-san.cnf"
   CSR="$OUT/$SVC.csr"
 
-  if [ "$FORCE_REGEN" != "1" ] && [ -f "$KEY" ] && [ -f "$CRT" ] && [ -f "$P12" ]; then
-    echo "[gen-certs] Reusing existing cert set for: $SVC"
+  if [ "$FORCE_REGEN" != "1" ] && [ -f "$KEY" ] && [ -f "$CRT" ]; then
+    echo "[gen-certs] Reusing existing PEM cert set for: $SVC"
     continue
   fi
 
-  echo "[gen-certs] Generating cert for: $SVC"
-  rm -f "$KEY" "$CRT" "$P12" "$CSR" "$SAN"
+  echo "[gen-certs] Generating PEM cert for: $SVC"
+  rm -f "$KEY" "$CRT" "$CSR" "$SAN"
 
   openssl genrsa -out "$KEY" 3072 2>/dev/null
 
@@ -67,22 +66,28 @@ EOF
     -extfile "$SAN" -extensions v3_req \
     -out "$CRT" 2>/dev/null
 
+  rm -f "$CSR" "$SAN"
+
+  echo "[gen-certs] Generated PEM cert set for: $SVC"
+done
+
+for SVC in "${SERVICES[@]}"; do
+  KEY="$OUT/$SVC.key"
+  CRT="$OUT/$SVC.crt"
+  P12="$OUT/$SVC-keystore.p12"
+
+  rm -f "$P12"
   openssl pkcs12 -export \
     -inkey "$KEY" -in "$CRT" -certfile "$OUT/ca.crt" \
     -out "$P12" -password "pass:$PASSWORD" -name "$SVC"
-
-  rm -f "$CSR" "$SAN"
+  echo "[gen-certs] Rebuilt keystore: $P12"
 done
 
-if [ "$FORCE_REGEN" = "1" ] || [ ! -f "$OUT/truststore.p12" ]; then
-  rm -f "$OUT/truststore.p12"
-  keytool -importcert -storetype PKCS12 \
-    -alias ca -file "$OUT/ca.crt" \
-    -keystore "$OUT/truststore.p12" -storepass "$PASSWORD" -noprompt
-  echo "[gen-certs] Generated truststore: $OUT/truststore.p12"
-else
-  echo "[gen-certs] Reusing existing truststore: $OUT/truststore.p12"
-fi
+rm -f "$OUT/truststore.p12"
+keytool -importcert -storetype PKCS12 \
+  -alias ca -file "$OUT/ca.crt" \
+  -keystore "$OUT/truststore.p12" -storepass "$PASSWORD" -noprompt
+echo "[gen-certs] Rebuilt truststore: $OUT/truststore.p12"
 
 echo "[gen-certs] Done. Files in $OUT:"
 ls -la "$OUT"

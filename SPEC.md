@@ -182,18 +182,17 @@ Jackson is configured with `JavaTimeModule`, `WRITE_DATES_AS_TIMESTAMPS=false`, 
 
 ### 4.4 Cert generation (`scripts/gen-certs.sh`)
 
-Idempotent: if `certs/ca.crt` exists, script exits 0 without regen (override with `FORCE=1`).
+Preserves existing PEM CA/leaf files by default. Rebuilds `*-keystore.p12` and `truststore.p12` on every run. Use `FORCE=1` for full CA/leaf regeneration.
 
 Steps:
 
-1. `openssl genrsa -out ca.key 3072`
-2. `openssl req -x509 -new -key ca.key -sha256 -days 3650 -out ca.crt -subj "/CN=locker-poc-ca"`
+1. Create `ca.key` + `ca.crt` only if missing, or recreate them when `FORCE=1`.
+2. For each service `S` in `{broker, rest-server, rest-client}`:
+   - reuse `<svc>.key` + `<svc>.crt` if already present, unless `FORCE=1`
+   - otherwise generate the missing PEM key/cert pair
 3. For each service `S` in `{broker, rest-server, rest-client}`:
-   - `openssl genrsa -out S.key 3072`
-   - Build CSR + SAN config file on the fly.
-   - `openssl x509 -req ... -CA ca.crt -CAkey ca.key -days 825 -extfile san.cnf`
-   - `openssl pkcs12 -export -inkey S.key -in S.crt -certfile ca.crt -out S-keystore.p12 -password pass:changeit -name S`
-4. Build `truststore.p12` from `ca.crt` via `keytool -importcert -storetype PKCS12 -alias ca -file ca.crt -keystore truststore.p12 -storepass changeit -noprompt`.
+   - always rebuild `<svc>-keystore.p12` from the current PEM files
+4. Always rebuild `truststore.p12` from `ca.crt` via `keytool -importcert -storetype PKCS12 -alias ca -file ca.crt -keystore truststore.p12 -storepass changeit -noprompt`.
 
 `cert-init` runs this script inside a tiny `alpine/openjdk` image (needs both `openssl` and `keytool`).
 
@@ -401,7 +400,7 @@ Naming: file suffix `IT` so Maven Failsafe picks it up; unit tests (none in this
 Implements `BeforeAllCallback` + `AfterAllCallback`:
 
 1. `beforeAll`:
-   - Run `./scripts/gen-certs.sh` (idempotent).
+   - Run `./scripts/gen-certs.sh` (preserves PEM files, rebuilds stores).
    - Run `docker compose up -d --build` from repo root.
    - Poll `docker compose ps --format json` until **every** service is either `running (healthy)` or (for one-shot containers `cert-init`, `rest-client`, `mqtt-publisher`) `exited 0`. Fail after 120 s.
    - Additionally assert `mqtt-subscriber` is `healthy` (i.e. `/tmp/mqtt-subscriber.ready` present) so test can safely publish.
