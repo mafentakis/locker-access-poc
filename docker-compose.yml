@@ -84,7 +84,7 @@ services:
       - locker-net
     restart: unless-stopped
     environment:
-      TLS_KEYSTORE_PATH: /certs/mqtt-subscriber-keystore.p12
+      TLS_KEYSTORE_PATH: /certs/rest-client-keystore.p12
       TLS_KEYSTORE_PASSWORD: changeit
       TLS_TRUSTSTORE_PATH: /certs/truststore.p12
       TLS_TRUSTSTORE_PASSWORD: changeit
@@ -142,7 +142,7 @@ services:
       - locker-net
     restart: "no"
     environment:
-      TLS_KEYSTORE_PATH: /certs/mqtt-publisher-keystore.p12
+      TLS_KEYSTORE_PATH: /certs/rest-client-keystore.p12
       TLS_KEYSTORE_PASSWORD: changeit
       TLS_TRUSTSTORE_PATH: /certs/truststore.p12
       TLS_TRUSTSTORE_PASSWORD: changeit

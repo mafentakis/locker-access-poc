@@ -7,7 +7,7 @@ SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 OUT="${CERT_OUT_DIR:-$SCRIPT_DIR/../certs}"
 PASSWORD="changeit"
 
-SERVICES=(mosquitto rest-server rest-client mqtt-publisher mqtt-subscriber)
+SERVICES=(mosquitto rest-server rest-client)
 
 if [ -f "$OUT/ca.crt" ] && [ "${FORCE:-0}" != "1" ]; then
   echo "[gen-certs] Certificates already exist in $OUT — skipping (set FORCE=1 to regenerate)."

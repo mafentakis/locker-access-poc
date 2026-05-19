@@ -57,7 +57,7 @@ locker-poc/
 └── SPEC.md
 ```
 
-Generated certificates are written by the `cert-init` container to `certs/`, which is git-ignored.
+Generated certificates are written by the `cert-init` container to `certs/`, which is git-ignored. The `mqtt-publisher` and `mqtt-subscriber` containers both reuse the `rest-client` certificate identity for MQTT client authentication.
 
 ---
 

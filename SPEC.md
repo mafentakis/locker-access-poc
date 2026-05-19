@@ -188,7 +188,7 @@ Steps:
 
 1. `openssl genrsa -out ca.key 3072`
 2. `openssl req -x509 -new -key ca.key -sha256 -days 3650 -out ca.crt -subj "/CN=locker-poc-ca"`
-3. For each service `S` in `{broker, rest-server, rest-client, mqtt-publisher, mqtt-subscriber}`:
+3. For each service `S` in `{broker, rest-server, rest-client}`:
    - `openssl genrsa -out S.key 3072`
    - Build CSR + SAN config file on the fly.
    - `openssl x509 -req ... -CA ca.crt -CAkey ca.key -days 825 -extfile san.cnf`
@@ -240,8 +240,8 @@ ACL is **not** configured in the PoC; `use_identity_as_username true` is documen
 | `mosquitto`      | `eclipse-mosquitto:2`      | `8883:8883`              | `./certs:/mosquitto/certs:ro`, `./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro` | —                                                                   |
 | `rest-server`    | `eclipse-temurin:21-jre`   | `8443:8443`              | `./certs:/certs:ro`                       | `TLS_*`, `MQTT_BROKER_URI=ssl://mosquitto:8883`, `HTTPS_BIND=0.0.0.0:8443`, `LOCKER_ID`, `LOG_LEVEL` |
 | `rest-client`    | `eclipse-temurin:21-jre`   | —                        | `./certs:/certs:ro`                       | `TLS_*`, `SERVER_URL=https://rest-server:8443`, `LOCKER_ID`, `COMPARTMENT_ID`, `LOG_LEVEL` |
-| `mqtt-publisher` | `eclipse-temurin:21-jre`   | —                        | `./certs:/certs:ro`                       | `TLS_*`, `MQTT_BROKER_URI=ssl://mosquitto:8883`, `LOG_LEVEL`        |
-| `mqtt-subscriber`| `eclipse-temurin:21-jre`   | —                        | `./certs:/certs:ro`                       | `TLS_*`, `MQTT_BROKER_URI=ssl://mosquitto:8883`, `LOG_LEVEL`        |
+| `mqtt-publisher` | `eclipse-temurin:21-jre`   | —                        | `./certs:/certs:ro`                       | `TLS_*` using `rest-client-keystore.p12`, `MQTT_BROKER_URI=ssl://mosquitto:8883`, `LOG_LEVEL`        |
+| `mqtt-subscriber`| `eclipse-temurin:21-jre`   | —                        | `./certs:/certs:ro`                       | `TLS_*` using `rest-client-keystore.p12`, `MQTT_BROKER_URI=ssl://mosquitto:8883`, `LOG_LEVEL`        |
 
 `TLS_*` expands to `TLS_KEYSTORE_PATH`, `TLS_KEYSTORE_PASSWORD`, `TLS_TRUSTSTORE_PATH`, `TLS_TRUSTSTORE_PASSWORD`. Each service points to its own `{service}-keystore.p12`.
 
@@ -338,8 +338,8 @@ Service-specific:
 
 - `rest-server`: `HTTPS_BIND`, `MQTT_BROKER_URI`, `MQTT_CLIENT_ID=rest-server`, `MQTT_TOPIC_OPENED=psfusion/business-event/v010/compartment/opened`, `LOCKER_ID`.
 - `rest-client`: `SERVER_URL`, `LOCKER_ID`, `COMPARTMENT_ID`, `API_VERSION=v010`, `CLIENT_VERSION=1.2.6`.
-- `mqtt-publisher`: `MQTT_BROKER_URI`, `MQTT_CLIENT_ID=mqtt-publisher`, `MQTT_TOPIC_OPENED=...`, `LOCKER_ID`, `COMPARTMENT_ID`.
-- `mqtt-subscriber`: `MQTT_BROKER_URI`, `MQTT_CLIENT_ID=mqtt-subscriber`, `MQTT_TOPIC_OPENED=...`.
+- `mqtt-publisher`: `MQTT_BROKER_URI`, `MQTT_CLIENT_ID=mqtt-publisher`, `MQTT_TOPIC_OPENED=...`, `LOCKER_ID`, `COMPARTMENT_ID`; reuses `rest-client-keystore.p12`.
+- `mqtt-subscriber`: `MQTT_BROKER_URI`, `MQTT_CLIENT_ID=mqtt-subscriber`, `MQTT_TOPIC_OPENED=...`; reuses `rest-client-keystore.p12`.
 
 ---
 
@@ -448,7 +448,7 @@ The `integration-test` module is safe to run in any environment where Docker + D
 
 The PoC is considered complete when **all** of the following hold on a fresh checkout on a Unix host with Docker:
 
-1. `./scripts/gen-certs.sh` runs from an empty state and produces, in `./certs/`: `ca.crt`, `ca.key`, and for each of `{broker, rest-server, rest-client, mqtt-publisher, mqtt-subscriber}`: `<svc>.crt`, `<svc>.key`, `<svc>-keystore.p12`, plus a single `truststore.p12`.
+1. `./scripts/gen-certs.sh` runs from an empty state and produces, in `./certs/`: `ca.crt`, `ca.key`, and for each of `{broker, rest-server, rest-client}`: `<svc>.crt`, `<svc>.key`, `<svc>-keystore.p12`, plus a single `truststore.p12`. The `mqtt-publisher` and `mqtt-subscriber` services reuse `rest-client-keystore.p12`.
 2. `docker compose build` succeeds with no warnings about missing files; all Java service images build from `Dockerfile.java-service`.
 3. `docker compose up` brings up `cert-init` (exits 0), then `mosquitto`, `rest-server`, `mqtt-subscriber` reach **healthy** state per §6.5, then `rest-client` and `mqtt-publisher` run once, mark themselves done, and exit 0.
 4. `docker compose ps` shows every long-running service as `healthy` and every one-shot service as `exited (0)`.
