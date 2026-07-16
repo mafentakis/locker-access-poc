@@ -229,6 +229,28 @@ log_type information
 
 ACL is **not** configured in the PoC; `use_identity_as_username true` is documented as the extension point for ACLs.
 
+### 4.7 DNS-workaround POC (`dns-workaround` branch)
+
+Proves that TLS hostname validation succeeds for a name resolved purely via
+`/etc/hosts`, never via real DNS — relevant because Docker's embedded DNS
+server (`127.0.0.11:53`) only resolves Compose service names, not arbitrary
+external hostnames.
+
+- On every (re)generation of the `rest-server` leaf cert, `gen-certs.sh`
+  generates a random UUID (`/proc/sys/kernel/random/uuid`) and adds
+  `DNS.3 = <uuid>.fusion.dhl.com` to its SAN, alongside the existing
+  `DNS.1=rest-server`, `DNS.2=localhost`, `IP.1=127.0.0.1`. The value is
+  persisted to `certs/rest-server-dns-alt.txt`.
+- `docker-entrypoint.sh` (shared by every service via `Dockerfile.java-service`,
+  see §6.3) reads that file, if present, and starts the JVM with
+  `-Drest.server.dns.alt.name=<uuid>.fusion.dhl.com`. Services that don't use
+  the property ignore it.
+- `EndToEndIT` (§10.5, test 7) never touches the certs directory directly —
+  it reads only the system property, resolves `rest-server`'s real container
+  IP via `InetAddress.getByName`, appends a temporary `/etc/hosts` entry
+  mapping the alt name to that IP, issues an HTTPS request against the alt
+  name, then removes the entry again.
+
 ---
 
 ## 5. Container / port matrix
@@ -279,7 +301,7 @@ No other runtime dependencies. No SLF4J (JUL is the single logger).
   - `INSTALL_CURL` - optional, default `false`; set to `true` only for `rest-server` so its Docker healthcheck can call `/health`.
 - **Multi-stage**:
   - stage 1 `maven:3.9-eclipse-temurin-21` copies `common/`, installs it with `mvn -f common/pom.xml install -DskipTests -q`, then copies `${MODULE}/` and runs `mvn -f ${MODULE}/pom.xml package -DskipTests -q`.
-  - stage 2 `eclipse-temurin:21-jre` conditionally installs `curl` when `INSTALL_CURL=true`, copies `/src/${MODULE}/target/app.jar` to `/app/app.jar`, and sets `ENTRYPOINT ["java","-jar","/app/app.jar"]`.
+  - stage 2 `eclipse-temurin:21-jre` conditionally installs `curl` when `INSTALL_CURL=true`, copies `/src/${MODULE}/target/app.jar` to `/app/app.jar`, copies the shared `docker-entrypoint.sh`, and sets `ENTRYPOINT ["/app/docker-entrypoint.sh"]`. The entrypoint launches `java -jar /app/app.jar`, adding `-Drest.server.dns.alt.name=...` when `certs/rest-server-dns-alt.txt` is present (§4.7).
 - Build context is the repo root so `common` and the selected module are visible.
 
 ### 6.4 `docker-compose.yml`
@@ -422,7 +444,8 @@ All tests use `HttpClient` with an `SSLContext` built from `certs/rest-client-ke
 | 4 | `missingLockTokenHeaderReturns400`                         | `POST` without `Lock-Token` header → HTTP 400, `errorCode=="MISSING_HEADER"`, `message` contains `Lock-Token`.                                                           |
 | 5 | `httpsWithoutClientCertIsRejected`                         | Build an `SSLContext` with truststore only (no keystore), `HttpClient` request → `SSLHandshakeException` (bad_certificate). Validates server-side `needClientAuth`.       |
 | 6 | `mqttWithoutClientCertIsRejected`                          | Open a raw TLS socket to `localhost:8883` with truststore only, attempt MQTT CONNECT → handshake fails or connection closed. Validates broker `require_certificate`.      |
-| 7 | `standaloneMqttPublisherEventWasObservedBySubscriber`      | Read `target/compose-logs.txt` after teardown of a dedicated run OR query `docker logs mqtt-subscriber` and assert at least **two** `Received event` lines (one from REST, one from standalone publisher), confirming acceptance criterion §11.5. |
+| 7 | `httpsWithDnsWorkaroundHostnameSucceeds`                   | Read the `rest.server.dns.alt.name` system property (§4.7), resolve `rest-server`'s real IP, add a temporary `/etc/hosts` entry, `GET https://<alt-name>:8443/health` → HTTP 200, body contains `"status":"UP"`. Removes the `/etc/hosts` entry afterward. Proves SAN-based hostname verification succeeds without a real DNS record. |
+| 8 | `standaloneMqttPublisherEventWasObservedBySubscriber`      | Read `target/compose-logs.txt` after teardown of a dedicated run OR query `docker logs mqtt-subscriber` and assert at least **two** `Received event` lines (one from REST, one from standalone publisher), confirming acceptance criterion §11.5. |
 
 ### 10.6 Runbook
 

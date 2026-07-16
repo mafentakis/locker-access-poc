@@ -87,6 +87,39 @@ Module `integration-test/` (JUnit 5, test scope only — no framework in product
 
 ---
 
+## DNS workaround POC (`dns-workaround` branch)
+
+Proof of concept demonstrating that TLS hostname validation succeeds when a
+DNS name present in the server certificate's `subjectAltName` is resolved
+locally via `/etc/hosts`, instead of via real DNS.
+
+- `scripts/gen-certs.sh` adds a third SAN entry to the `rest-server`
+  certificate on each (re)generation: `DNS.3 = <random-uuid>.fusion.dhl.com`.
+  The UUID is generated fresh per run (`/proc/sys/kernel/random/uuid`) and
+  written to `certs/rest-server-dns-alt.txt`.
+- The `rest-server` container is only reachable inside the `locker-net`
+  Docker bridge network under its Compose service name (`rest-server`),
+  resolved by the embedded Docker DNS server (`127.0.0.11:53`). Docker DNS has
+  no entry for `...fusion.dhl.com` — it only knows service names declared in
+  `docker-compose.yml`.
+- `docker-entrypoint.sh` (used by every service built from
+  `Dockerfile.java-service`) reads `certs/rest-server-dns-alt.txt`, if
+  present, and starts the JVM with
+  `-Drest.server.dns.alt.name=<uuid>.fusion.dhl.com`. The integration test
+  never touches the certs directory directly — it only reads the system
+  property.
+- Before making its HTTPS call, the integration test resolves the real,
+  dynamically-assigned IP of `rest-server` (`InetAddress.getByName`) and
+  appends it to `/etc/hosts` in the `integration-test` container under the
+  alias from the system property. `/etc/hosts` lookups take priority over
+  Docker DNS, so the client resolves the alias to `rest-server`'s current IP
+  without a real DNS record. The entry is removed again after the test.
+- This proves that hostname verification against the SAN succeeds purely
+  because the name is present in `/etc/hosts` — no real DNS record for
+  `fusion.dhl.com` is required for the POC to pass.
+
+---
+
 ## Security disclaimer
 
 This repository is a **proof of concept**. Certificates are self-signed, private keys are stored in a local volume, IDs are hard-coded, and there is no secret management. **Do not reuse any of this in production.**

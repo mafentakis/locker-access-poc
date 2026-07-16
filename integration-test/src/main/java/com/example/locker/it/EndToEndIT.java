@@ -5,10 +5,15 @@ import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.*;
 
 import javax.net.ssl.SSLContext;
+import java.net.InetAddress;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardOpenOption;
+import java.util.List;
 import java.util.UUID;
 
 import static org.junit.jupiter.api.Assertions.*;
@@ -21,6 +26,7 @@ public class EndToEndIT {
     private static final String LOCKER_ID = "f47ac10b-58cc-4372-a567-0e02b2c3d479";
     private static final String COMPARTMENT_ID = "compartmentInfo@d4e5f6a7-b8c9-0123-defa-234567890123";
     private static final String TOPIC = "psfusion/business-event/v010/compartment/opened";
+    private static final String DNS_ALT_NAME_PROPERTY = "rest.server.dns.alt.name";
 
     private static HttpClient httpClient;
 
@@ -124,6 +130,41 @@ public class EndToEndIT {
             SSLContext trustOnly = CertLoader.trustOnlySslContext();
             new MqttTestClient(trustOnly, MQTT_BROKER, TOPIC);
         }, "MQTT connection without client cert should be rejected");
+    }
+
+    /**
+     * DNS-workaround POC: {@code <uuid>.fusion.dhl.com} is not resolvable by
+     * Docker's embedded DNS (it only knows compose service names). We resolve
+     * rest-server's real container IP and add a temporary /etc/hosts entry
+     * mapping the alt name to it, proving TLS hostname verification against
+     * the certificate's SAN succeeds without any real DNS record.
+     */
+    @Test
+    @Order(7)
+    void httpsWithDnsWorkaroundHostnameSucceeds() throws Exception {
+        String altFqdn = System.getProperty(DNS_ALT_NAME_PROPERTY);
+        assertNotNull(altFqdn, "Required system property not set: " + DNS_ALT_NAME_PROPERTY);
+        assertFalse(altFqdn.isBlank(), "System property " + DNS_ALT_NAME_PROPERTY + " must not be blank");
+
+        String restServerIp = InetAddress.getByName("rest-server").getHostAddress();
+
+        Path hostsFile = Path.of("/etc/hosts");
+        String hostsEntry = restServerIp + " " + altFqdn;
+        Files.writeString(hostsFile, hostsEntry + System.lineSeparator(), StandardOpenOption.APPEND);
+
+        try {
+            HttpRequest req = HttpRequest.newBuilder()
+                    .uri(URI.create("https://" + altFqdn + ":8443/health"))
+                    .GET().build();
+            HttpResponse<String> resp = httpClient.send(req, HttpResponse.BodyHandlers.ofString());
+            assertEquals(200, resp.statusCode());
+            assertTrue(resp.body().contains("\"status\":\"UP\""));
+        } finally {
+            List<String> remaining = Files.readAllLines(hostsFile).stream()
+                    .filter(line -> !line.contains(altFqdn))
+                    .toList();
+            Files.write(hostsFile, remaining);
+        }
     }
 }
 

@@ -8,6 +8,10 @@ OUT="${CERT_OUT_DIR:-$SCRIPT_DIR/../certs}"
 PASSWORD="changeit"
 SERVICES=(mosquitto rest-server rest-client)
 FORCE_REGEN="${FORCE:-0}"
+# rest-server's cert carries an extra SAN entry for the DNS-workaround POC:
+# a random UUID under fusion.dhl.com, resolved only via a local /etc/hosts
+# entry (see integration-test), never via real DNS.
+DNS_ALT_FQDN_FILE="$OUT/rest-server-dns-alt.txt"
 
 mkdir -p "$OUT"
 echo "[gen-certs] Generating certificates in $OUT"
@@ -30,6 +34,9 @@ for SVC in "${SERVICES[@]}"; do
 
   if [ "$FORCE_REGEN" != "1" ] && [ -f "$KEY" ] && [ -f "$CRT" ]; then
     echo "[gen-certs] Reusing existing PEM cert set for: $SVC"
+    if [ "$SVC" = "rest-server" ] && [ ! -f "$DNS_ALT_FQDN_FILE" ]; then
+      echo "[gen-certs] WARNING: $DNS_ALT_FQDN_FILE missing for reused rest-server cert; DNS-workaround SAN unknown. Rerun with FORCE=1 to regenerate."
+    fi
     continue
   fi
 
@@ -37,6 +44,15 @@ for SVC in "${SERVICES[@]}"; do
   rm -f "$KEY" "$CRT" "$CSR" "$SAN"
 
   openssl genrsa -out "$KEY" 3072 2>/dev/null
+
+  EXTRA_SAN=""
+  if [ "$SVC" = "rest-server" ]; then
+    DNS_UUID="$(cat /proc/sys/kernel/random/uuid)"
+    DNS_ALT_FQDN="${DNS_UUID}.fusion.dhl.com"
+    echo "$DNS_ALT_FQDN" > "$DNS_ALT_FQDN_FILE"
+    EXTRA_SAN="DNS.3 = $DNS_ALT_FQDN"
+    echo "[gen-certs] rest-server DNS-workaround SAN: $DNS_ALT_FQDN"
+  fi
 
   cat > "$SAN" <<EOF
 [req]
@@ -56,6 +72,7 @@ extendedKeyUsage = serverAuth, clientAuth
 DNS.1 = $SVC
 DNS.2 = localhost
 IP.1  = 127.0.0.1
+$EXTRA_SAN
 EOF
 
   openssl req -new -key "$KEY" -out "$CSR" -config "$SAN"
@@ -92,4 +109,4 @@ echo "[gen-certs] Rebuilt truststore: $OUT/truststore.p12"
 echo "[gen-certs] Done. Files in $OUT:"
 ls -la "$OUT"
 
-chmod 644 "$OUT"/*.key "$OUT"/*.crt "$OUT"/*.p12 2>/dev/null || true
+chmod 644 "$OUT"/*.key "$OUT"/*.crt "$OUT"/*.p12 "$DNS_ALT_FQDN_FILE" 2>/dev/null || true
